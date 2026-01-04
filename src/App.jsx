@@ -744,11 +744,11 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 font-mono" onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} tabIndex={0}>
       {/* HOME STATE */}
       {state === 'home' && (
-        <div className="w-full min-h-screen bg-linear-to-b from-slate-900 to-slate-950 p-8 pb-8">
+        <div className="w-full min-h-screen bg-linear-to-b from-slate-900 to-slate-950 p-4 sm:p-6 md:p-8 pb-8">
           <div className="max-w-4xl mx-auto">
             {/* Header */}
-            <h1 className="text-2xl font-bold mb-2 text-slate-100">GD Rhythm Trainer</h1>
-            <p className="text-sm text-slate-500 mb-4">
+            <h1 className="text-xl sm:text-2xl font-bold mb-2 text-slate-100">GD Rhythm Trainer</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mb-4">
               Click a map to play. SPACE: press/release. ESC: quit.
             </p>
 
@@ -768,58 +768,58 @@ export default function App() {
             </div>
 
             {/* Map List */}
-            <div className="border-2 border-slate-700 rounded-lg p-6 mb-8 bg-slate-900 h-110">
+            <div className="border-2 border-slate-700 rounded-lg p-3 sm:p-4 md:p-6 mb-6 sm:mb-8 bg-slate-900">
               {/* Selection controls */}
               {maps.length > 0 && (
-                <div className="h-10 mb-3 flex items-center justify-between pb-4 border-b border-slate-700">
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300 hover:text-slate-100 transition">
+                <div className="mb-3 pb-3 sm:pb-4 border-b border-slate-700 space-y-2 sm:space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs sm:text-sm text-slate-300 hover:text-slate-100 transition">
                     <input
                       type="checkbox"
                       checked={filteredMaps.length > 0 && selectedMaps.length === filteredMaps.length}
                       onChange={toggleSelectAll}
-                      className="w-5 h-5 cursor-pointer appearance-none bg-slate-700 border-2 border-slate-600 rounded checked:bg-blue-600 checked:border-blue-600 hover:border-slate-500 transition"
+                      className="w-4 h-4 sm:w-5 sm:h-5 cursor-pointer appearance-none bg-slate-700 border-2 border-slate-600 rounded checked:bg-blue-600 checked:border-blue-600 hover:border-slate-500 transition"
                     />
                     Select All ({filteredMaps.length})
                   </label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       onClick={handleDownloadSelected}
                       disabled={loading || selectedMaps.length === 0}
-                      className="px-3 py-1 text-sm bg-green-700 hover:bg-green-600 disabled:bg-slate-700 disabled:text-slate-500 rounded transition"
+                      className="px-2 sm:px-3 py-1.5 sm:py-1 text-xs sm:text-sm bg-green-700 hover:bg-green-600 disabled:bg-slate-700 disabled:text-slate-500 rounded transition whitespace-nowrap"
                     >
                       Download Selected ({selectedMaps.length})
                     </button>
                     <button
                       onClick={handleDownloadAll}
                       disabled={loading || maps.length === 0}
-                      className="px-3 py-1 text-sm bg-green-800 hover:bg-green-700 disabled:bg-slate-700 disabled:text-slate-500 rounded transition"
+                      className="px-2 sm:px-3 py-1.5 sm:py-1 text-xs sm:text-sm bg-green-800 hover:bg-green-700 disabled:bg-slate-700 disabled:text-slate-500 rounded transition whitespace-nowrap"
                     >
                       Download All
                     </button>
                     <button
                       onClick={handleDeleteSelected}
                       disabled={loading || selectedMaps.length === 0}
-                      className="px-3 py-1 text-sm bg-red-700 hover:bg-red-600 disabled:bg-slate-700 disabled:text-slate-500 rounded transition"
+                      className="px-2 sm:px-3 py-1.5 sm:py-1 text-xs sm:text-sm bg-red-700 hover:bg-red-600 disabled:bg-slate-700 disabled:text-slate-500 rounded transition whitespace-nowrap"
                     >
                       Delete Selected ({selectedMaps.length})
                     </button>
                     <button
                       onClick={handleDeleteAll}
                       disabled={loading || maps.length === 0}
-                      className="px-3 py-1 text-sm bg-red-900 hover:bg-red-800 disabled:bg-slate-700 disabled:text-slate-500 rounded transition"
+                      className="px-2 sm:px-3 py-1.5 sm:py-1 text-xs sm:text-sm bg-red-900 hover:bg-red-800 disabled:bg-slate-700 disabled:text-slate-500 rounded transition whitespace-nowrap"
                     >
                       Delete All
                     </button>
                   </div>
                 </div>
               )}
-              <div className="h-78 flex flex-col">
+              <div className="min-h-[280px] sm:min-h-[320px] md:h-78 flex flex-col">
                 {loading ? (
-                  <p className="text-slate-400">Loading maps...</p>
+                  <p className="text-slate-400 text-sm">Loading maps...</p>
                 ) : maps.length === 0 ? (
-                  <p className="text-slate-400">No maps found. Use "Upload Map" button below to add .gdr files</p>
+                  <p className="text-slate-400 text-sm">No maps found. Use "Upload Map" button below to add .gdr files</p>
                 ) : filteredMaps.length === 0 ? (
-                  <p className="text-slate-400">No maps match your search</p>
+                  <p className="text-slate-400 text-sm">No maps match your search</p>
                 ) : (
                   <div className="space-y-3">
                     {visibleMaps.map((map, idx) => (
@@ -883,27 +883,27 @@ export default function App() {
               </div>
 
               {/* Pagination - always visible with fixed height */}
-              <div className="flex items-center justify-center gap-4 h-8">
+              <div className="flex items-center justify-center gap-2 sm:gap-4 mt-3 sm:mt-0 min-h-[32px]">
                 {filteredMaps.length > 4 ? (
                   <>
                     <button
                       onClick={() => setScrollOffset(Math.max(0, scrollOffset - 1))}
-                      className="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 rounded"
+                      className="px-2 sm:px-3 py-1 text-xs sm:text-sm bg-slate-700 hover:bg-slate-600 rounded"
                     >
                       ←
                     </button>
-                    <span className="text-sm text-slate-400 w-32 text-center">
+                    <span className="text-xs sm:text-sm text-slate-400 w-24 sm:w-32 text-center">
                       {scrollOffset + 1}-{Math.min(scrollOffset + 4, filteredMaps.length)} of {filteredMaps.length}
                     </span>
                     <button
                       onClick={() => setScrollOffset(Math.min(scrollOffset + 1, filteredMaps.length - 4))}
-                      className="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 rounded"
+                      className="px-2 sm:px-3 py-1 text-xs sm:text-sm bg-slate-700 hover:bg-slate-600 rounded"
                     >
                       →
                     </button>
                   </>
                 ) : (
-                  <span className="text-sm text-slate-500">
+                  <span className="text-xs sm:text-sm text-slate-500">
                     {filteredMaps.length > 0 ? `${filteredMaps.length} map${filteredMaps.length !== 1 ? 's' : ''}` : ''}
                   </span>
                 )}
@@ -935,18 +935,18 @@ export default function App() {
             </div>
 
             {/* Bottom Controls */}
-            <div className="flex justify-between items-center gap-4">
-              <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row sm:justify-between gap-4">
+              <div className="flex flex-wrap gap-2 sm:gap-4">
                 <button
                   onClick={() => refreshMaps(true)}
                   disabled={loading}
-                  className="px-6 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition"
+                  className="px-4 sm:px-6 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition text-sm sm:text-base"
                 >
                   <RefreshCw size={16} />
                   Refresh
                 </button>
 
-                <label className="px-6 py-2 bg-green-700 hover:bg-green-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition cursor-pointer">
+                <label className="px-4 sm:px-6 py-2 bg-green-700 hover:bg-green-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition cursor-pointer text-sm sm:text-base">
                   <Upload size={16} />
                   Upload Map
                   <input
@@ -959,7 +959,7 @@ export default function App() {
                   />
                 </label>
 
-                <label className="px-6 py-2 bg-purple-700 hover:bg-purple-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition cursor-pointer">
+                <label className="px-4 sm:px-6 py-2 bg-purple-700 hover:bg-purple-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition cursor-pointer text-sm sm:text-base">
                   <Upload size={16} />
                   Upload Music
                   <input
@@ -973,10 +973,10 @@ export default function App() {
                 </label>
               </div>
 
-              <div className="flex gap-4">
+              <div className="flex flex-wrap gap-2 sm:gap-4">
                 <button
                   onClick={() => setMusicEnabled(!musicEnabled)}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${
+                  className={`px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition text-sm sm:text-base ${
                     musicEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-slate-700 hover:bg-slate-600'
                   }`}
                 >
@@ -985,7 +985,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => setBeepEnabled(!beepEnabled)}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${
+                  className={`px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition text-sm sm:text-base ${
                     beepEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-slate-700 hover:bg-slate-600'
                   }`}
                 >
