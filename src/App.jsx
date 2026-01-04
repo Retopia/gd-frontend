@@ -6,6 +6,9 @@ import { api } from './api';
 import GameCanvas from './GameCanvas';
 
 export default function App() {
+  // API Configuration
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
   // State management
   const [state, setState] = useState('home'); // 'home', 'lead_in', 'play', 'results', 'edit'
   const [maps, setMaps] = useState([]);
@@ -327,7 +330,7 @@ export default function App() {
 
       // If map has music, download as zip for convenience
       if (map.has_music) {
-        const response = await fetch('http://localhost:8000/api/maps/download-zip', {
+        const response = await fetch(`${API_URL}/api/maps/download-zip`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ map_names: [map.name] })
@@ -348,7 +351,7 @@ export default function App() {
         URL.revokeObjectURL(url);
       } else {
         // No music, just download the .gdr file
-        await downloadFile(`http://localhost:8000/api/maps/${encodeURIComponent(map.name)}/download`, `${map.name}.gdr`);
+        await downloadFile(`${API_URL}/api/maps/${encodeURIComponent(map.name)}/download`, `${map.name}.gdr`);
       }
 
       toast.success(`Downloaded ${map.name}`);
@@ -365,7 +368,7 @@ export default function App() {
     try {
       setLoading(true);
 
-      const response = await fetch('http://localhost:8000/api/maps/download-zip', {
+      const response = await fetch(`${API_URL}/api/maps/download-zip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ map_names: selectedMaps })
@@ -399,7 +402,7 @@ export default function App() {
     try {
       setLoading(true);
 
-      const response = await fetch('http://localhost:8000/api/maps/download-zip', {
+      const response = await fetch(`${API_URL}/api/maps/download-zip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ map_names: maps.map(m => m.name) })
@@ -456,7 +459,7 @@ export default function App() {
       try {
         const musicInfo = await api.getMusic(map.name);
         if (musicInfo && musicInfo.available) {
-          musicUrlRef.current = `http://localhost:8000${musicInfo.url}`;
+          musicUrlRef.current = `${API_URL}${musicInfo.url}`;
           const audio = new Audio(musicUrlRef.current);
           audio.preload = 'auto';
           musicAudioRef.current = audio;

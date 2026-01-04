@@ -45,7 +45,13 @@ npm run preview
 
 ## Environment Variables
 
-The frontend expects the backend API to be running at `http://localhost:8000`. You can modify this in `src/api.js` if needed.
+Create a `.env` file in the frontend directory (copy from `.env.example`):
+
+```bash
+VITE_API_URL=http://localhost:8000
+```
+
+- `VITE_API_URL` - Backend API URL (default: `http://localhost:8000`)
 
 ## Features
 
