@@ -744,7 +744,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 font-mono" onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} tabIndex={0}>
       {/* HOME STATE */}
       {state === 'home' && (
-        <div className="w-full h-screen bg-linear-to-b from-slate-900 to-slate-950 p-8">
+        <div className="w-full min-h-screen bg-linear-to-b from-slate-900 to-slate-950 p-8 pb-8">
           <div className="max-w-4xl mx-auto">
             {/* Header */}
             <h1 className="text-2xl font-bold mb-2 text-slate-100">GD Rhythm Trainer</h1>
