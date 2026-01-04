@@ -53,6 +53,20 @@ VITE_API_URL=http://localhost:8000
 
 - `VITE_API_URL` - Backend API URL (default: `http://localhost:8000`)
 
+## Health Check
+
+For monitoring and Coolify deployments:
+
+**Endpoint:** `/health.json`
+
+Returns:
+```json
+{
+  "status": "healthy",
+  "service": "GD Rhythm Trainer Frontend"
+}
+```
+
 ## Features
 
 - Upload and manage .gdr map files
@@ -62,3 +76,12 @@ VITE_API_URL=http://localhost:8000
 - Practice specific sections of maps
 - Download maps and music as zip files
 - Real-time storage usage tracking
+
+## Deployment
+
+### Coolify
+
+**Health Check Path:** `/health.json`
+**Port:** 4173 (preview) or 80 (with nginx)
+
+Set the `VITE_API_URL` environment variable to your backend URL.
