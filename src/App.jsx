@@ -850,30 +850,30 @@ export default function App() {
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2">
                           <button
                             onClick={(e) => handleDownloadMap(e, map)}
-                            className="p-2 rounded-lg bg-green-700 hover:bg-green-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                            className="p-1.5 sm:p-2 rounded-lg bg-green-700 hover:bg-green-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center"
                             disabled={loading}
                             title="Download map and music"
                           >
-                            <Download size={20} className="text-white" />
+                            <Download size={18} className="text-white sm:w-5 sm:h-5" />
                           </button>
                           <button
                             onClick={(e) => handleEditMap(e, map)}
-                            className="p-2 rounded-lg bg-blue-700 hover:bg-blue-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                            className="p-1.5 sm:p-2 rounded-lg bg-blue-700 hover:bg-blue-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center"
                             disabled={loading}
                             title="Edit map"
                           >
-                            <Pencil size={20} className="text-white" />
+                            <Pencil size={18} className="text-white sm:w-5 sm:h-5" />
                           </button>
                           <button
                             onClick={(e) => handleDeleteMap(e, map)}
-                            className="p-2 rounded-lg bg-red-700 hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                            className="p-1.5 sm:p-2 rounded-lg bg-red-700 hover:bg-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center"
                             disabled={loading}
                             title="Delete map and music"
                           >
-                            <X size={20} className="text-white" />
+                            <X size={18} className="text-white sm:w-5 sm:h-5" />
                           </button>
                         </div>
                       </div>
