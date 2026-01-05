@@ -33,7 +33,12 @@ export default function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [practiceStart, setPracticeStart] = useState('');
   const [practiceEnd, setPracticeEnd] = useState('');
+  const [pressOnlyMode, setPressOnlyMode] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, message: '', onConfirm: null });
+  const [leniencyConfig, setLeniencyConfig] = useState(null);
+  const [editingMapData, setEditingMapData] = useState(null);
+  const [initialLeniencyConfig, setInitialLeniencyConfig] = useState(null);
+  const leniencyFormRef = useRef(null);
 
   // Refs
   const gameLoopRef = useRef(null);
@@ -55,6 +60,10 @@ export default function App() {
   const LANE_Y_FRAC = 0.55;
   const TARGET_FRAC = 1 / 3;
   const BEEP_VOLUME = 0.35 * 0.35; // ~0.12 to match old
+
+  // Tick conversion helpers
+  const msToTicks = (ms, fps) => ms / (1000 / fps);
+  const ticksToMs = (ticks, fps) => ticks * (1000 / fps);
 
   // Initialize
   useEffect(() => {
@@ -430,18 +439,46 @@ export default function App() {
     }
   };
 
-  const handleEditMap = (e, map) => {
+  const hasUnsavedChanges = () => {
+    // With uncontrolled inputs, we can't easily track changes without reading form
+    // For now, we'll skip this check to avoid lag
+    return false;
+  };
+
+  const handleEditMap = async (e, map) => {
     e.stopPropagation(); // Prevent map selection when clicking edit
-    setSelectedMap(map);
-    setState('edit');
+
+    try {
+      setLoading(true);
+
+      // Load map data and leniency configuration
+      const [mapData, leniency] = await Promise.all([
+        api.loadMap(map.name),
+        api.getLeniency(map.name)
+      ]);
+
+      setSelectedMap(map);
+      setEditingMapData(mapData);
+      setLeniencyConfig(leniency);
+      setInitialLeniencyConfig(JSON.parse(JSON.stringify(leniency))); // Deep copy
+      setState('edit');
+    } catch (err) {
+      toast.error('Failed to load map editor');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMapSelect = async (map) => {
     try {
       setLoading(true);
-      const data = await api.loadMap(map.name);
+      const [data, leniency] = await Promise.all([
+        api.loadMap(map.name),
+        api.getLeniency(map.name)
+      ]);
       setGameData(data);
       setSelectedMap(map);
+      setLeniencyConfig(leniency);
       setInputEvents([]);
       setCurrentTime(0);
       setLeadInCountdown(LEAD_IN_S);
@@ -595,6 +632,7 @@ export default function App() {
       const result = await api.evaluateResults(selectedMap.name, inputEvents, {
         hit_window_ms: HIT_WINDOW_MS,
         end_time: currentTime,
+        press_only_mode: pressOnlyMode,
       });
       setStats(result);
       setEndTime(currentTime);
@@ -612,6 +650,7 @@ export default function App() {
       const result = await api.exportResults(selectedMap.name, inputEvents, {
         hit_window_ms: HIT_WINDOW_MS,
         end_time: endTime,
+        press_only_mode: pressOnlyMode,
       });
 
       // Trigger browser download
@@ -632,7 +671,10 @@ export default function App() {
   };
 
   const calculateTimingFeedback = (kind, actualT) => {
-    if (!gameData || !gameData.events) return;
+    if (!gameData || !gameData.events || !leniencyConfig) return;
+
+    // In press-only mode, don't show feedback for releases
+    if (pressOnlyMode && kind === 'up') return;
 
     const events = gameData.events;
 
@@ -653,11 +695,23 @@ export default function App() {
 
     if (closestEvent) {
       const offsetMs = closestOffset * 1000;
-      setTimingFeedback({ offset: offsetMs, time: Date.now() });
+
+      // Get leniency for this event to determine if it's a hit
+      const custom = leniencyConfig.custom[closestEvent.idx.toString()];
+      const earlyWindow = custom?.early_ms ?? leniencyConfig.default_early_ms;
+      const lateWindow = custom?.late_ms ?? leniencyConfig.default_late_ms;
+
+      // Check if within leniency window (asymmetric)
+      const isHit = (offsetMs < 0 && Math.abs(offsetMs) <= earlyWindow) || (offsetMs >= 0 && offsetMs <= lateWindow);
+
+      setTimingFeedback({ offset: offsetMs, time: Date.now(), isHit });
     }
   };
 
   const handleKeyDown = (e) => {
+    // Don't handle keyboard shortcuts when typing in input fields
+    const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+
     // Modal keyboard handlers
     if (confirmModal.isOpen) {
       if (e.code === 'Enter') {
@@ -671,13 +725,13 @@ export default function App() {
     }
 
     // Lead-in state: Space to start countdown
-    if (e.code === 'Space' && state === 'lead_in' && !countdownStarted) {
+    if (e.code === 'Space' && state === 'lead_in' && !countdownStarted && !isTyping) {
       e.preventDefault();
       setCountdownStarted(true);
       return;
     }
 
-    if (e.code === 'Space' && state === 'play' && !spaceHeldRef.current) {
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && state === 'play' && !spaceHeldRef.current) {
       e.preventDefault();
       spaceHeldRef.current = true;
       recordInput('down', currentTime);
@@ -687,14 +741,25 @@ export default function App() {
       e.preventDefault();
       endGame();
     }
-    if (e.code === 'Backspace' && (state === 'results' || state === 'edit' || state === 'lead_in')) {
+    if (e.code === 'Backspace' && (state === 'results' || state === 'edit' || state === 'lead_in') && !isTyping) {
       e.preventDefault();
-      setState('home');
+      if (state === 'edit' && hasUnsavedChanges()) {
+        showConfirmModal(
+          'You have unsaved changes. Are you sure you want to leave?',
+          () => setState('home')
+        );
+      } else {
+        setState('home');
+      }
+    }
+    if (e.code === 'Space' && state === 'results' && !isTyping) {
+      e.preventDefault();
+      handleMapSelect(selectedMap);
     }
   };
 
   const handleKeyUp = (e) => {
-    if (e.code === 'Space' && state === 'play') {
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && state === 'play') {
       e.preventDefault();
       spaceHeldRef.current = false;
       recordInput('up', currentTime);
@@ -749,7 +814,7 @@ export default function App() {
             {/* Header */}
             <h1 className="text-xl sm:text-2xl font-bold mb-2 text-slate-100">GD Rhythm Trainer</h1>
             <p className="text-xs sm:text-sm text-slate-500 mb-4">
-              Click a map to play. SPACE: press/release. ESC: quit.
+              Click a map to play
             </p>
 
             {/* Search Bar */}
@@ -1076,6 +1141,24 @@ export default function App() {
                   Leave empty to practice the entire map
                 </p>
               </div>
+
+              {/* Press Only Mode */}
+              <div>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pressOnlyMode}
+                    onChange={(e) => setPressOnlyMode(e.target.checked)}
+                    className="w-5 h-5 cursor-pointer appearance-none bg-slate-700 border-2 border-slate-600 rounded checked:bg-blue-600 checked:border-blue-600 hover:border-slate-500 transition"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-slate-300">Press Only Mode</span>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Only judge press events, ignore releases (like some GD game modes)
+                    </p>
+                  </div>
+                </label>
+              </div>
             </div>
 
             {/* Start Button or Countdown */}
@@ -1097,14 +1180,14 @@ export default function App() {
                     Back to Home <span className="text-slate-400 text-sm">(Backspace)</span>
                   </button>
                 </div>
-                <p className="text-slate-400 text-sm">Adjust settings above, then press Space or click Start</p>
+                <p className="text-slate-400 text-sm">Adjust settings above, then press Space/↑ or click Start</p>
               </div>
             ) : (
               <div className="text-center">
                 <h2 className="text-xl font-bold mb-4 text-slate-100">
                   Starting in {Math.max(0, leadInCountdown).toFixed(2)}s
                 </h2>
-                <p className="text-slate-400">SPACE: press/release. ESC: quit.</p>
+                <p className="text-slate-400">SPACE/↑: press/release. ESC: quit.</p>
               </div>
             )}
           </div>
@@ -1131,27 +1214,66 @@ export default function App() {
             <p>t={Math.max(0, currentTime).toFixed(3)}s</p>
             <p>
               {(() => {
-                const HIT_WINDOW_S = 0.018;
+                if (!leniencyConfig) return '';
+
                 // Get practice section bounds
                 const sectionStart = practiceStart ? parseFloat(practiceStart) : 0;
                 const sectionEnd = practiceEnd ? parseFloat(practiceEnd) : Infinity;
-                
+
                 // Filter events to only those in the practice section
-                const sectionEvents = gameData.events.filter(exp => exp.t >= sectionStart && exp.t <= sectionEnd);
-                
-                // Judged = events in section whose hit window has passed
-                const judged = sectionEvents.filter(exp => currentTime > exp.t + HIT_WINDOW_S).length;
-                // Hits = inputs that matched an expected event within the hit window
+                let sectionEvents = gameData.events.filter(exp => exp.t >= sectionStart && exp.t <= sectionEnd);
+
+                // In press-only mode, only count press events
+                if (pressOnlyMode) {
+                  sectionEvents = sectionEvents.filter(exp => exp.kind === 'down');
+                }
+
+                // Helper to get leniency for an event
+                const getLeniency = (eventIdx) => {
+                  const custom = leniencyConfig.custom[eventIdx.toString()];
+                  return {
+                    early: (custom?.early_ms ?? leniencyConfig.default_early_ms) / 1000,
+                    late: (custom?.late_ms ?? leniencyConfig.default_late_ms) / 1000
+                  };
+                };
+
+                // Judged = events whose late window has passed
+                const judged = sectionEvents.filter(exp => {
+                  const leniency = getLeniency(exp.idx);
+                  return currentTime > exp.t + leniency.late;
+                }).length;
+
+                // Hits = inputs that matched an expected event within their leniency window
                 const hits = inputEvents.filter(evt =>
-                  sectionEvents.some(exp => Math.abs(evt.actual_t - exp.t) <= HIT_WINDOW_S && evt.kind === exp.kind)
+                  sectionEvents.some(exp => {
+                    if (evt.kind !== exp.kind) return false;
+                    const leniency = getLeniency(exp.idx);
+                    const offset = evt.actual_t - exp.t;
+                    return offset >= -leniency.early && offset <= leniency.late;
+                  })
                 ).length;
+
                 const misses = judged - hits;
                 return `judged=${judged}/${sectionEvents.length}   misses=${Math.max(0, misses)}`;
               })()}
             </p>
             <p>
               {(() => {
-                const nextEvent = gameData.events.find(exp => exp.t > currentTime - 0.018);
+                if (!leniencyConfig) return '';
+                const getLeniency = (eventIdx) => {
+                  const custom = leniencyConfig.custom[eventIdx.toString()];
+                  return {
+                    early: (custom?.early_ms ?? leniencyConfig.default_early_ms) / 1000,
+                    late: (custom?.late_ms ?? leniencyConfig.default_late_ms) / 1000
+                  };
+                };
+
+                // In press-only mode, only show next press event
+                const nextEvent = gameData.events.find(exp => {
+                  if (pressOnlyMode && exp.kind === 'up') return false;
+                  const leniency = getLeniency(exp.idx);
+                  return exp.t > currentTime - leniency.early;
+                });
                 return nextEvent ? `Next: ${nextEvent.kind.toUpperCase()} @ ${nextEvent.t.toFixed(3)}s (f ${nextEvent.frame})` : '';
               })()}
             </p>
@@ -1161,13 +1283,16 @@ export default function App() {
           {timingFeedback && Date.now() - timingFeedback.time < 500 && (
             <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
               <p className={`text-4xl font-bold font-mono ${
-                Math.abs(timingFeedback.offset) <= HIT_WINDOW_MS
+                timingFeedback.isHit
                   ? 'text-green-400'
                   : timingFeedback.offset < 0
                     ? 'text-blue-400'
                     : 'text-orange-400'
               }`}>
-                {timingFeedback.offset >= 0 ? '+' : ''}{timingFeedback.offset.toFixed(1)}ms
+                {timingFeedback.offset >= 0 ? '+' : '-'}{Math.round(msToTicks(Math.abs(timingFeedback.offset), selectedMap.fps))} ticks
+              </p>
+              <p className="text-lg text-slate-300 text-center mt-1">
+                ({timingFeedback.offset >= 0 ? '+' : ''}{timingFeedback.offset.toFixed(1)}ms)
               </p>
             </div>
           )}
@@ -1182,9 +1307,9 @@ export default function App() {
       {/* RESULTS STATE */}
       {state === 'results' && stats && (
         <div className="w-full h-screen bg-gradient-to-b from-slate-900 to-slate-950 p-8 flex flex-col items-center">
-          <div className="w-full max-w-lg">
+          <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8">
             <h1 className="text-4xl font-bold mb-2 text-slate-100">Run Results</h1>
-            {selectedMap && <p className="text-slate-400 mb-8">Map: {selectedMap.name}</p>}
+            {selectedMap && <p className="text-slate-400">Map: {selectedMap.name}</p>}
 
             {/* Stats Grid */}
             <div className="space-y-4 mb-8">
@@ -1210,16 +1335,105 @@ export default function App() {
               </div>
 
               <div className="bg-slate-800 p-4 rounded-lg">
-                <p className="text-slate-400 text-sm">Mean Hit Offset</p>
-                <p className="text-xl font-bold text-slate-100">
-                  {stats.mean > 0 ? '+' : ''}{stats.mean.toFixed(2)} ms (negative=early, positive=late)
+                <p className="text-slate-400 text-sm">Mean Offset Early</p>
+                <p className="text-xl font-bold text-blue-400">
+                  {stats.mean_early === 0 ? 'N/A' : (
+                    <>
+                      {Math.round(msToTicks(Math.abs(stats.mean_early), selectedMap.fps))} ticks
+                      <span className="text-sm text-blue-300 block">
+                        ({stats.mean_early.toFixed(2)} ms)
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
               <div className="bg-slate-800 p-4 rounded-lg">
-                <p className="text-slate-400 text-sm">Worst Hit Offset</p>
-                <p className="text-xl font-bold text-slate-100">{stats.worst.toFixed(2)} ms</p>
+                <p className="text-slate-400 text-sm">Mean Offset Late</p>
+                <p className="text-xl font-bold text-orange-400">
+                  {stats.mean_late === 0 ? 'N/A' : (
+                    <>
+                      +{Math.round(msToTicks(stats.mean_late, selectedMap.fps))} ticks
+                      <span className="text-sm text-orange-300 block">
+                        (+{stats.mean_late.toFixed(2)} ms)
+                      </span>
+                    </>
+                  )}
+                </p>
               </div>
             </div>
+
+            {/* Detailed Results */}
+            {stats.detailed_results && stats.detailed_results.length > 0 && (
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 max-h-[70vh] overflow-y-auto">
+                <div className="space-y-2">
+                  {stats.detailed_results.map((result, idx) => {
+                        const isExtra = isNaN(result.expected_t);
+                        const isHit = result.verdict === 'hit';
+                        const isMiss = result.verdict === 'miss';
+
+                        return (
+                          <div
+                            key={idx}
+                            className={`p-3 rounded-lg border-l-4 ${
+                              isHit
+                                ? 'bg-green-900/20 border-green-500'
+                                : isExtra
+                                ? 'bg-yellow-900/20 border-yellow-500'
+                                : 'bg-red-900/20 border-red-500'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                {!isExtra ? (
+                                  <div className="flex items-center gap-4">
+                                    <span className="text-sm font-mono text-slate-400">#{result.idx}</span>
+                                    <span className={`text-sm font-semibold ${
+                                      result.kind === 'down' ? 'text-blue-400' : 'text-purple-400'
+                                    }`}>
+                                      {result.kind === 'down' ? '▼ PRESS' : '▲ RELEASE'}
+                                    </span>
+                                    <span className="text-sm text-slate-400">
+                                      @ {result.expected_t.toFixed(3)}s (f{result.expected_frame})
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-4">
+                                    <span className="text-sm font-semibold text-yellow-400">⚠ UNEXPECTED</span>
+                                    <span className={`text-sm ${
+                                      result.kind === 'down' ? 'text-blue-400' : 'text-purple-400'
+                                    }`}>
+                                      {result.kind === 'down' ? 'PRESS' : 'RELEASE'}
+                                    </span>
+                                    <span className="text-sm text-slate-400">
+                                      @ {result.actual_t?.toFixed(3)}s
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                {isHit && result.offset_ms !== null && (
+                                  <div>
+                                    <span className="text-lg font-bold text-green-400">
+                                      {result.offset_ms >= 0 ? '+' : ''}{Math.round(msToTicks(result.offset_ms, selectedMap.fps))} ticks
+                                    </span>
+                                    <span className="text-xs text-slate-400 block">
+                                      ({result.offset_ms >= 0 ? '+' : ''}{result.offset_ms.toFixed(1)}ms)
+                                    </span>
+                                  </div>
+                                )}
+                                {isMiss && !isExtra && (
+                                  <span className="text-lg font-bold text-red-400">
+                                    {result.actual_t === null ? 'NO INPUT' : 'MISS'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Controls */}
@@ -1237,7 +1451,7 @@ export default function App() {
               className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center gap-2 transition"
             >
               <Play size={16} />
-              Play Again
+              Play Again <span className="text-blue-200 text-sm">(Space)</span>
             </button>
 
             <button
@@ -1253,43 +1467,216 @@ export default function App() {
       )}
 
       {/* EDIT MAP STATE */}
-      {state === 'edit' && selectedMap && (
-        <div className="w-full h-screen bg-gradient-to-b from-slate-900 to-slate-950 p-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <h1 className="text-4xl font-bold text-slate-100">Edit Map</h1>
+      {state === 'edit' && selectedMap && editingMapData && leniencyConfig && (
+        <div className="w-full min-h-screen bg-gradient-to-b from-slate-900 to-slate-950 p-4 sm:p-8">
+          <div className="max-w-6xl mx-auto">
+          <form ref={leniencyFormRef} onSubmit={(e) => e.preventDefault()}>
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl sm:text-4xl font-bold text-slate-100">Edit Leniency</h1>
               <button
-                onClick={() => setState('home')}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg flex items-center gap-2 transition"
+                onClick={() => {
+                  if (hasUnsavedChanges()) {
+                    showConfirmModal(
+                      'You have unsaved changes. Are you sure you want to leave?',
+                      () => setState('home')
+                    );
+                  } else {
+                    setState('home');
+                  }
+                }}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg flex items-center gap-2 transition text-sm"
               >
                 <Home size={16} />
-                Back to Home <span className="text-slate-400 text-sm">(Backspace)</span>
+                Back <span className="hidden sm:inline text-slate-400 text-sm">(Backspace)</span>
               </button>
             </div>
 
-            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-slate-100 mb-4">{selectedMap.name}</h2>
+            {/* Map Info */}
+            <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 sm:p-6 mb-6">
+              <h2 className="text-lg sm:text-xl font-semibold text-slate-100 mb-4">{selectedMap.name}</h2>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <p className="text-slate-400">Events</p>
-                  <p className="text-slate-100 font-mono">{selectedMap.events}</p>
+                  <p className="text-slate-100 font-mono">{editingMapData.events.length}</p>
                 </div>
                 <div>
                   <p className="text-slate-400">FPS</p>
-                  <p className="text-slate-100 font-mono">{selectedMap.fps.toFixed(2)}</p>
+                  <p className="text-slate-100 font-mono">{editingMapData.fps.toFixed(2)}</p>
                 </div>
                 <div>
                   <p className="text-slate-400">Duration</p>
-                  <p className="text-slate-100 font-mono">{selectedMap.duration.toFixed(2)}s</p>
+                  <p className="text-slate-100 font-mono">{editingMapData.duration.toFixed(2)}s</p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-              <p className="text-slate-400 text-center py-8">
-                Map editing functionality coming soon...
-              </p>
+            {/* Default Leniency */}
+            <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 sm:p-6 mb-6">
+              <h3 className="text-lg font-semibold text-slate-100 mb-4">Default Leniency</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">Early Leniency (ticks)</label>
+                  <input
+                    name="default_early"
+                    defaultValue={Math.round(msToTicks(leniencyConfig.default_early_ms, editingMapData.fps))}
+                    className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded text-slate-100 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">Late Leniency (ticks)</label>
+                  <input
+                    name="default_late"
+                    defaultValue={Math.round(msToTicks(leniencyConfig.default_late_ms, editingMapData.fps))}
+                    className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded text-slate-100 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
             </div>
+
+            {/* Events List */}
+            <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 sm:p-6 mb-6">
+              <h3 className="text-lg font-semibold text-slate-100 mb-4">Event Leniency Settings</h3>
+              <p className="text-sm text-slate-400 mb-4">
+                Customize early/late leniency for individual events. Empty fields use default values.
+              </p>
+
+              <div className="max-h-[500px] overflow-y-auto space-y-2">
+                {editingMapData.events.map((event) => {
+                  const customLeniency = leniencyConfig.custom[event.idx.toString()];
+                  return (
+                    <div key={event.idx} className="bg-slate-700 p-3 rounded-lg">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
+                        {/* Event info */}
+                        <div className="sm:col-span-4">
+                          <p className="text-xs text-slate-400">
+                            Event #{event.idx}
+                          </p>
+                          <p className="text-sm text-slate-100 font-mono">
+                            {event.kind.toUpperCase()} @ {event.t.toFixed(3)}s (f{event.frame})
+                          </p>
+                        </div>
+
+                        {/* Early leniency */}
+                        <div className="sm:col-span-3">
+                          <label className="block text-xs text-slate-400 mb-1">Early (ticks)</label>
+                          <input
+                            name={`event_${event.idx}_early`}
+                            placeholder="Default"
+                            defaultValue={customLeniency?.early_ms !== undefined ? Math.round(msToTicks(customLeniency.early_ms, editingMapData.fps)) : ''}
+                            className="w-full px-2 py-1 bg-slate-600 border-2 border-slate-500 rounded text-slate-100 text-sm focus:outline-none focus:border-blue-500 transition"
+                          />
+                        </div>
+
+                        {/* Late leniency */}
+                        <div className="sm:col-span-3">
+                          <label className="block text-xs text-slate-400 mb-1">Late (ticks)</label>
+                          <input
+                            name={`event_${event.idx}_late`}
+                            placeholder="Default"
+                            defaultValue={customLeniency?.late_ms !== undefined ? Math.round(msToTicks(customLeniency.late_ms, editingMapData.fps)) : ''}
+                            className="w-full px-2 py-1 bg-slate-600 border-2 border-slate-500 rounded text-slate-100 text-sm focus:outline-none focus:border-blue-500 transition"
+                          />
+                        </div>
+
+                        {/* Clear button */}
+                        <div className="sm:col-span-2 flex items-center">
+                          {customLeniency && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                const form = e.target.closest('form');
+                                form[`event_${event.idx}_early`].value = '';
+                                form[`event_${event.idx}_late`].value = '';
+                              }}
+                              className="w-full px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs transition"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => {
+                  if (hasUnsavedChanges()) {
+                    showConfirmModal(
+                      'You have unsaved changes. Are you sure you want to leave?',
+                      () => setState('home')
+                    );
+                  } else {
+                    setState('home');
+                  }
+                }}
+                className="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setLoading(true);
+
+                    // Read form values and build leniency config
+                    const form = leniencyFormRef.current;
+                    const defaultEarly = parseFloat(form.default_early.value);
+                    const defaultLate = parseFloat(form.default_late.value);
+
+                    const custom = {};
+                    editingMapData.events.forEach((event) => {
+                      const earlyValue = form[`event_${event.idx}_early`]?.value;
+                      const lateValue = form[`event_${event.idx}_late`]?.value;
+
+                      if (earlyValue || lateValue) {
+                        const entry = {};
+
+                        if (earlyValue) {
+                          entry.early_ms = ticksToMs(parseFloat(earlyValue), editingMapData.fps);
+                        }
+
+                        if (lateValue) {
+                          entry.late_ms = ticksToMs(parseFloat(lateValue), editingMapData.fps);
+                        }
+
+                        // Only save if entry has at least one field
+                        if (Object.keys(entry).length > 0) {
+                          custom[event.idx.toString()] = entry;
+                        }
+                      }
+                    });
+
+                    const newConfig = {
+                      default_early_ms: ticksToMs(defaultEarly, editingMapData.fps),
+                      default_late_ms: ticksToMs(defaultLate, editingMapData.fps),
+                      custom
+                    };
+
+                    await api.updateLeniency(selectedMap.name, newConfig);
+                    setLeniencyConfig(newConfig);
+                    setInitialLeniencyConfig(JSON.parse(JSON.stringify(newConfig)));
+                    toast.success('Leniency settings saved');
+                    setState('home');
+                  } catch (err) {
+                    toast.error('Failed to save leniency settings');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 rounded-lg transition font-semibold"
+              >
+                Save Changes
+              </button>
+            </div>
+            </form>
           </div>
         </div>
       )}

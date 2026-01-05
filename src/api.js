@@ -33,6 +33,7 @@ export const api = {
       hit_window_ms = 18.0,
       hold_min_frames = 3,
       end_time = null,
+      press_only_mode = false,
     } = options;
 
     const response = await fetch(`${API_BASE}/results/evaluate`, {
@@ -46,6 +47,7 @@ export const api = {
         hold_min_frames,
         input_events: inputEvents,
         end_time: end_time,
+        press_only_mode,
       }),
     });
     if (!response.ok) throw new Error('Failed to evaluate results');
@@ -60,6 +62,7 @@ export const api = {
       hit_window_ms = 18.0,
       hold_min_frames = 3,
       end_time = null,
+      press_only_mode = false,
     } = options;
 
     const response = await fetch(`${API_BASE}/results/export`, {
@@ -73,6 +76,7 @@ export const api = {
         hold_min_frames,
         input_events: inputEvents,
         end_time: end_time,
+        press_only_mode,
       }),
     });
     if (!response.ok) throw new Error('Failed to export results');
@@ -142,6 +146,24 @@ export const api = {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete music');
+    return response.json();
+  },
+
+  // Get leniency configuration for a map
+  async getLeniency(mapName) {
+    const response = await fetch(`${API_BASE}/maps/${mapName}/leniency`);
+    if (!response.ok) throw new Error('Failed to fetch leniency config');
+    return response.json();
+  },
+
+  // Update leniency configuration for a map
+  async updateLeniency(mapName, leniencyConfig) {
+    const response = await fetch(`${API_BASE}/maps/${mapName}/leniency`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(leniencyConfig),
+    });
+    if (!response.ok) throw new Error('Failed to update leniency config');
     return response.json();
   },
 };
