@@ -62,7 +62,7 @@ export default function App() {
   const SCROLL_S = 2.5;
   const LANE_Y_FRAC = 0.55;
   const TARGET_FRAC = 1 / 3;
-  const BEEP_VOLUME = 0.35 * 0.35; // ~0.12 to match old
+  const BEEP_VOLUME = 0.35 * 0.35 * 1.5; // ~0.18 (50% louder)
 
   // Tick conversion helpers
   const msToTicks = (ms, fps) => ms / (1000 / fps);
@@ -904,7 +904,7 @@ export default function App() {
             </div>
 
             {/* Map List */}
-            <div className="border-2 border-slate-700 rounded-lg p-3 sm:p-4 md:p-6 mb-6 sm:mb-8 bg-slate-900">
+            <div className="border-2 border-slate-700 rounded-lg p-3 sm:p-4 md:p-6 mb-4 sm:mb-6 bg-slate-900">
               {/* Selection controls */}
               {maps.length > 0 && (
                 <div className="mb-3 pb-3 sm:pb-4 border-b border-slate-700 space-y-2 sm:space-y-3">
@@ -1047,7 +1047,7 @@ export default function App() {
             </div>
 
             {/* Storage Tracker */}
-            <div className="mb-6 h-12">
+            <div className="mb-4 h-12">
               {storage && (
                 <>
                   <div className="flex items-center justify-between text-sm mb-1">
@@ -1351,9 +1351,16 @@ export default function App() {
             </p>
           </div>
 
-          {/* Timing feedback display */}
+          {/* Timing feedback display - positioned above target box */}
           {timingFeedback && Date.now() - timingFeedback.time < 500 && (
-            <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                left: `${((targetX + 10) / width) * 100}%`,
+                top: `${((laneY - 120) / height) * 100}%`,
+                transform: 'translate(-50%, -50%)'
+              }}
+            >
               <p className={`text-4xl font-bold font-mono ${
                 timingFeedback.isHit
                   ? 'text-green-400'
@@ -1396,7 +1403,7 @@ export default function App() {
 
             {/* Stats Grid */}
             <div className="space-y-4 mb-8">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="bg-slate-800 p-4 rounded-lg">
                   <p className="text-slate-400 text-sm">Completion</p>
                   <p className="text-2xl font-bold text-slate-100">
@@ -1410,10 +1417,6 @@ export default function App() {
                 <div className="bg-slate-800 p-4 rounded-lg">
                   <p className="text-slate-400 text-sm">Misses</p>
                   <p className="text-2xl font-bold text-red-400">{Math.floor(stats.misses)}</p>
-                </div>
-                <div className="bg-slate-800 p-4 rounded-lg">
-                  <p className="text-slate-400 text-sm">Unexpected</p>
-                  <p className="text-2xl font-bold text-yellow-400">{Math.floor(stats.extras)}</p>
                 </div>
               </div>
 
@@ -1450,9 +1453,7 @@ export default function App() {
               <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 max-h-[70vh] overflow-y-auto">
                 <div className="space-y-2">
                   {stats.detailed_results.map((result, idx) => {
-                        const isExtra = result.expected_t === null || result.expected_t === undefined;
                         const isHit = result.verdict === 'hit';
-                        const isMiss = result.verdict === 'miss';
 
                         return (
                           <div
@@ -1460,38 +1461,22 @@ export default function App() {
                             className={`p-3 rounded-lg border-l-4 ${
                               isHit
                                 ? 'bg-green-900/20 border-green-500'
-                                : isExtra
-                                ? 'bg-yellow-900/20 border-yellow-500'
                                 : 'bg-red-900/20 border-red-500'
                             }`}
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex-1">
-                                {!isExtra ? (
-                                  <div className="flex items-center gap-4">
-                                    <span className="text-sm font-mono text-slate-400">#{result.idx}</span>
-                                    <span className={`text-sm font-semibold ${
-                                      result.kind === 'down' ? 'text-blue-400' : 'text-purple-400'
-                                    }`}>
-                                      {result.kind === 'down' ? '▼ PRESS' : '▲ RELEASE'}
-                                    </span>
-                                    <span className="text-sm text-slate-400">
-                                      @ {result.expected_t.toFixed(3)}s (f{result.expected_frame})
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-4">
-                                    <span className="text-sm font-semibold text-yellow-400">⚠ UNEXPECTED</span>
-                                    <span className={`text-sm ${
-                                      result.kind === 'down' ? 'text-blue-400' : 'text-purple-400'
-                                    }`}>
-                                      {result.kind === 'down' ? 'PRESS' : 'RELEASE'}
-                                    </span>
-                                    <span className="text-sm text-slate-400">
-                                      @ {result.actual_t?.toFixed(3)}s
-                                    </span>
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-4">
+                                  <span className="text-sm font-mono text-slate-400">#{result.idx}</span>
+                                  <span className={`text-sm font-semibold ${
+                                    result.kind === 'down' ? 'text-blue-400' : 'text-purple-400'
+                                  }`}>
+                                    {result.kind === 'down' ? '▼ PRESS' : '▲ RELEASE'}
+                                  </span>
+                                  <span className="text-sm text-slate-400">
+                                    @ {result.expected_t.toFixed(3)}s (f{result.expected_frame})
+                                  </span>
+                                </div>
                               </div>
                               <div className="text-right">
                                 {isHit && result.offset_ms !== null && (
@@ -1504,7 +1489,7 @@ export default function App() {
                                     </span>
                                   </div>
                                 )}
-                                {isMiss && !isExtra && (
+                                {!isHit && (
                                   <span className="text-lg font-bold text-red-400">
                                     {result.actual_t === null ? 'NO INPUT' : 'MISS'}
                                   </span>
