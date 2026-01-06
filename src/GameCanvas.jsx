@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export default function GameCanvas({
   currentTime,
@@ -12,12 +12,48 @@ export default function GameCanvas({
   expectedEvents = [],
 }) {
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const [canvasSize, setCanvasSize] = useState({ width, height });
+
+  // Handle responsive canvas sizing
+  useEffect(() => {
+    const updateSize = () => {
+      if (!containerRef.current) return;
+
+      const containerWidth = containerRef.current.clientWidth;
+      const containerHeight = containerRef.current.clientHeight;
+      const aspectRatio = width / height;
+
+      let newWidth = containerWidth;
+      let newHeight = containerWidth / aspectRatio;
+
+      // If height would be too tall, constrain by height instead
+      if (newHeight > containerHeight) {
+        newHeight = containerHeight;
+        newWidth = containerHeight * aspectRatio;
+      }
+
+      setCanvasSize({ width: Math.floor(newWidth), height: Math.floor(newHeight) });
+    };
+
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, [width, height]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
+
+    // Scale factor for responsive drawing
+    const scaleX = canvasSize.width / width;
+    const scaleY = canvasSize.height / height;
+
+    ctx.save();
+    ctx.scale(scaleX, scaleY);
+
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
 
@@ -88,14 +124,18 @@ export default function GameCanvas({
       }
     });
 
-  }, [currentTime, notes, targetX, laneY, scrollS, width, height]);
+    ctx.restore();
+
+  }, [currentTime, notes, targetX, laneY, scrollS, width, height, canvasSize]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      className="w-full h-full bg-black"
-    />
+    <div ref={containerRef} className="w-full h-full flex items-center justify-center bg-black">
+      <canvas
+        ref={canvasRef}
+        width={canvasSize.width}
+        height={canvasSize.height}
+        className="bg-black"
+      />
+    </div>
   );
 }

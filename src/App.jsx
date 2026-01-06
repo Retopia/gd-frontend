@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Music2, Volume2, RefreshCw, Play, Home, Download, Search, Upload, X, Pencil } from 'lucide-react';
+import { Music2, Volume2, Play, Home, Download, Search, Upload, X, Pencil } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { api } from './api';
@@ -52,6 +52,9 @@ export default function App() {
   const musicUrlRef = useRef(null);
   const spaceHeldRef = useRef(false);
   const beepNextIdxRef = useRef(0);
+  const currentTimeRef = useRef(0);
+  const inputEventsRef = useRef([]);
+  const endingGameRef = useRef(false);
 
   // Configuration
   const HIT_WINDOW_MS = 18.0;
@@ -528,6 +531,11 @@ export default function App() {
     spaceHeldRef.current = false;
     beepNextIdxRef.current = 0;
 
+    // Reset refs to avoid stale data
+    currentTimeRef.current = startTime;
+    inputEventsRef.current = [];
+    endingGameRef.current = false;
+
     // Initialize audio for beeps
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -559,7 +567,9 @@ export default function App() {
     const gameLoop = () => {
       const now = performance.now() / 1000;
       const t = (now - playStartRef.current + LEAD_IN_S) * playbackSpeed;
-      setCurrentTime(Math.max(0, t));
+      const timeValue = Math.max(0, t);
+      currentTimeRef.current = timeValue;
+      setCurrentTime(timeValue);
 
       // Handle beeps based on macro events
       if (beepEnabledRef.current && gameData.events && gainNodeRef.current) {
@@ -600,10 +610,19 @@ export default function App() {
   };
 
   const recordInput = (kind, actualT) => {
-    setInputEvents((prev) => [...prev, { kind, actual_t: actualT }]);
+    const newEvent = { kind, actual_t: actualT };
+    inputEventsRef.current = [...inputEventsRef.current, newEvent];
+    setInputEvents((prev) => [...prev, newEvent]);
   };
 
   const endGame = async () => {
+    // Prevent multiple simultaneous calls (race condition protection)
+    if (endingGameRef.current) {
+      console.warn('endGame: Already ending game, ignoring duplicate call');
+      return;
+    }
+    endingGameRef.current = true;
+
     if (gameLoopRef.current) {
       cancelAnimationFrame(gameLoopRef.current);
       gameLoopRef.current = null;
@@ -626,19 +645,42 @@ export default function App() {
       musicAudioRef.current.currentTime = 0;
     }
 
-    if (!selectedMap || !gameData) return;
+    if (!selectedMap || !gameData) {
+      console.warn('endGame: selectedMap or gameData is null', { selectedMap: !!selectedMap, gameData: !!gameData });
+      setState('home');
+      return;
+    }
+
+    // Use refs to get current values synchronously (avoids race conditions)
+    const finalTime = currentTimeRef.current;
+    const finalInputEvents = inputEventsRef.current;
 
     try {
-      const result = await api.evaluateResults(selectedMap.name, inputEvents, {
+      console.log('endGame: Evaluating results', {
+        mapName: selectedMap.name,
+        inputEventsCount: finalInputEvents.length,
+        finalTime,
+        pressOnlyMode,
+        stateTime: currentTime,
+        stateEventsCount: inputEvents.length
+      });
+
+      const result = await api.evaluateResults(selectedMap.name, finalInputEvents, {
         hit_window_ms: HIT_WINDOW_MS,
-        end_time: currentTime,
+        end_time: finalTime,
         press_only_mode: pressOnlyMode,
       });
+
+      console.log('endGame: Evaluation successful', result);
       setStats(result);
-      setEndTime(currentTime);
+      setEndTime(finalTime);
       setState('results');
     } catch (err) {
-      toast.error('Failed to evaluate results');
+      console.error('endGame: Failed to evaluate results', err);
+      toast.error(`Failed to evaluate results: ${err.message || 'Unknown error'}`);
+      setState('home');
+    } finally {
+      endingGameRef.current = false;
     }
   };
 
@@ -767,12 +809,41 @@ export default function App() {
     }
   };
 
+  const handleTouchStart = (e) => {
+    if (state === 'play' && !spaceHeldRef.current) {
+      spaceHeldRef.current = true;
+      recordInput('down', currentTimeRef.current);
+      calculateTimingFeedback('down', currentTimeRef.current);
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    if (state === 'play' && spaceHeldRef.current) {
+      spaceHeldRef.current = false;
+      recordInput('up', currentTimeRef.current);
+      calculateTimingFeedback('up', currentTimeRef.current);
+    }
+  };
+
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+
+    // Add touch listeners with passive: false to allow preventDefault
+    const playDiv = document.querySelector('[data-play-area]');
+    if (playDiv && state === 'play') {
+      playDiv.addEventListener('touchstart', handleTouchStart, { passive: false });
+      playDiv.addEventListener('touchend', handleTouchEnd, { passive: false });
+    }
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+
+      if (playDiv) {
+        playDiv.removeEventListener('touchstart', handleTouchStart);
+        playDiv.removeEventListener('touchend', handleTouchEnd);
+      }
     };
   }, [state, currentTime]);
 
@@ -1002,15 +1073,6 @@ export default function App() {
             {/* Bottom Controls */}
             <div className="flex flex-col sm:flex-row sm:justify-between gap-4">
               <div className="flex flex-wrap gap-2 sm:gap-4">
-                <button
-                  onClick={() => refreshMaps(true)}
-                  disabled={loading}
-                  className="px-4 sm:px-6 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition text-sm sm:text-base"
-                >
-                  <RefreshCw size={16} />
-                  Refresh
-                </button>
-
                 <label className="px-4 sm:px-6 py-2 bg-green-700 hover:bg-green-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition cursor-pointer text-sm sm:text-base">
                   <Upload size={16} />
                   Upload Map
@@ -1170,14 +1232,18 @@ export default function App() {
                     className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold transition flex items-center gap-2"
                   >
                     <Play size={20} />
-                    Start Practice <span className="text-blue-200 text-sm">(Space)</span>
+                    <span className="sm:hidden">Start</span>
+                    <span className="hidden sm:inline">Start Practice</span>
+                    <span className="hidden sm:inline text-blue-200 text-sm">(Space)</span>
                   </button>
                   <button
                     onClick={() => setState('home')}
                     className="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition flex items-center gap-2"
                   >
                     <Home size={16} />
-                    Back to Home <span className="text-slate-400 text-sm">(Backspace)</span>
+                    <span className="sm:hidden">Back</span>
+                    <span className="hidden sm:inline">Back to Home</span>
+                    <span className="hidden sm:inline text-slate-400 text-sm">(Backspace)</span>
                   </button>
                 </div>
                 <p className="text-slate-400 text-sm">Adjust settings above, then press Space/↑ or click Start</p>
@@ -1187,7 +1253,10 @@ export default function App() {
                 <h2 className="text-xl font-bold mb-4 text-slate-100">
                   Starting in {Math.max(0, leadInCountdown).toFixed(2)}s
                 </h2>
-                <p className="text-slate-400">SPACE/↑: press/release. ESC: quit.</p>
+                <p className="text-slate-400">
+                  <span className="hidden sm:inline">SPACE/↑: press/release. ESC: quit.</span>
+                  <span className="sm:hidden">Tap to press/release</span>
+                </p>
               </div>
             )}
           </div>
@@ -1196,7 +1265,10 @@ export default function App() {
 
       {/* PLAY STATE */}
       {state === 'play' && gameData && (
-        <div className="w-full h-screen bg-slate-950 flex flex-col relative">
+        <div
+          data-play-area
+          className="w-full h-screen bg-slate-950 flex flex-col relative"
+        >
           <GameCanvas
             currentTime={currentTime}
             notes={gameData.notes}
@@ -1297,9 +1369,20 @@ export default function App() {
             </div>
           )}
 
-          {/* Exit hint */}
-          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-xs text-slate-500">
-            ESC to exit
+          {/* Finish button */}
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                endGame();
+              }}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              className="px-4 py-2 bg-red-600 hover:bg-red-500 active:bg-red-700 rounded-lg font-semibold transition text-sm sm:text-base shadow-lg pointer-events-auto"
+            >
+              Finish
+              <span className="hidden sm:inline text-red-200 text-sm ml-2">(Esc)</span>
+            </button>
           </div>
         </div>
       )}
@@ -1367,7 +1450,7 @@ export default function App() {
               <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 max-h-[70vh] overflow-y-auto">
                 <div className="space-y-2">
                   {stats.detailed_results.map((result, idx) => {
-                        const isExtra = isNaN(result.expected_t);
+                        const isExtra = result.expected_t === null || result.expected_t === undefined;
                         const isHit = result.verdict === 'hit';
                         const isMiss = result.verdict === 'miss';
 
@@ -1443,7 +1526,9 @@ export default function App() {
               className="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg flex items-center gap-2 transition"
             >
               <Home size={16} />
-              Back to Home <span className="text-slate-400 text-sm">(Backspace)</span>
+              <span className="sm:hidden">Back</span>
+              <span className="hidden sm:inline">Back to Home</span>
+              <span className="hidden sm:inline text-slate-400 text-sm">(Backspace)</span>
             </button>
 
             <button
@@ -1451,7 +1536,9 @@ export default function App() {
               className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center gap-2 transition"
             >
               <Play size={16} />
-              Play Again <span className="text-blue-200 text-sm">(Space)</span>
+              <span className="sm:hidden">Retry</span>
+              <span className="hidden sm:inline">Play Again</span>
+              <span className="hidden sm:inline text-blue-200 text-sm">(Space)</span>
             </button>
 
             <button
@@ -1460,7 +1547,8 @@ export default function App() {
               className="px-6 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 rounded-lg flex items-center gap-2 transition"
             >
               <Download size={16} />
-              Export Results
+              <span className="sm:hidden">Export</span>
+              <span className="hidden sm:inline">Export Results</span>
             </button>
           </div>
         </div>
@@ -1698,13 +1786,13 @@ export default function App() {
                 onClick={closeConfirmModal}
                 className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition"
               >
-                Cancel <span className="text-slate-400 text-sm">(Esc)</span>
+                Cancel <span className="hidden sm:inline text-slate-400 text-sm">(Esc)</span>
               </button>
               <button
                 onClick={handleConfirm}
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg transition font-semibold"
               >
-                Confirm <span className="text-slate-400 text-sm">(Enter)</span>
+                Confirm <span className="hidden sm:inline text-slate-400 text-sm">(Enter)</span>
               </button>
             </div>
           </div>

@@ -50,7 +50,12 @@ export const api = {
         press_only_mode,
       }),
     });
-    if (!response.ok) throw new Error('Failed to evaluate results');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const error = new Error(errorData.detail || 'Failed to evaluate results');
+      error.status = response.status;
+      throw error;
+    }
     return response.json();
   },
 
