@@ -33,7 +33,6 @@ export default function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [practiceStart, setPracticeStart] = useState('');
   const [practiceEnd, setPracticeEnd] = useState('');
-  const [pressOnlyMode, setPressOnlyMode] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, message: '', onConfirm: null });
   const [leniencyConfig, setLeniencyConfig] = useState(null);
   const [editingMapData, setEditingMapData] = useState(null);
@@ -576,14 +575,21 @@ export default function App() {
         while (beepNextIdxRef.current < gameData.events.length &&
                gameData.events[beepNextIdxRef.current].t <= t) {
           const ev = gameData.events[beepNextIdxRef.current];
-          const audioTime = audioCtx.currentTime;
-          gainNodeRef.current.gain.cancelScheduledValues(audioTime);
-          gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, audioTime);
-          if (ev.kind === 'down') {
-            gainNodeRef.current.gain.linearRampToValueAtTime(BEEP_VOLUME, audioTime + 0.008);
-          } else {
-            gainNodeRef.current.gain.linearRampToValueAtTime(0, audioTime + 0.018);
+
+          // Check if this event is disabled in leniency config
+          const isDisabled = gameData.leniency?.custom?.[ev.idx]?.enabled === false;
+
+          if (!isDisabled) {
+            const audioTime = audioCtx.currentTime;
+            gainNodeRef.current.gain.cancelScheduledValues(audioTime);
+            gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, audioTime);
+            if (ev.kind === 'down') {
+              gainNodeRef.current.gain.linearRampToValueAtTime(BEEP_VOLUME, audioTime + 0.008);
+            } else {
+              gainNodeRef.current.gain.linearRampToValueAtTime(0, audioTime + 0.018);
+            }
           }
+
           beepNextIdxRef.current++;
         }
       }
@@ -656,6 +662,8 @@ export default function App() {
     const finalInputEvents = inputEventsRef.current;
 
     try {
+      const pressOnlyMode = gameData?.leniency?.press_only_mode || false;
+
       console.log('endGame: Evaluating results', {
         mapName: selectedMap.name,
         inputEventsCount: finalInputEvents.length,
@@ -689,6 +697,7 @@ export default function App() {
 
     try {
       setLoading(true);
+      const pressOnlyMode = gameData?.leniency?.press_only_mode || false;
       const result = await api.exportResults(selectedMap.name, inputEvents, {
         hit_window_ms: HIT_WINDOW_MS,
         end_time: endTime,
@@ -716,7 +725,7 @@ export default function App() {
     if (!gameData || !gameData.events || !leniencyConfig) return;
 
     // In press-only mode, don't show feedback for releases
-    if (pressOnlyMode && kind === 'up') return;
+    if (leniencyConfig.press_only_mode && kind === 'up') return;
 
     const events = gameData.events;
 
@@ -1203,24 +1212,6 @@ export default function App() {
                   Leave empty to practice the entire map
                 </p>
               </div>
-
-              {/* Press Only Mode */}
-              <div>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pressOnlyMode}
-                    onChange={(e) => setPressOnlyMode(e.target.checked)}
-                    className="w-5 h-5 cursor-pointer appearance-none bg-slate-700 border-2 border-slate-600 rounded checked:bg-blue-600 checked:border-blue-600 hover:border-slate-500 transition"
-                  />
-                  <div>
-                    <span className="text-sm font-medium text-slate-300">Press Only Mode</span>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Only judge press events, ignore releases (like some GD game modes)
-                    </p>
-                  </div>
-                </label>
-              </div>
             </div>
 
             {/* Start Button or Countdown */}
@@ -1296,7 +1287,7 @@ export default function App() {
                 let sectionEvents = gameData.events.filter(exp => exp.t >= sectionStart && exp.t <= sectionEnd);
 
                 // In press-only mode, only count press events
-                if (pressOnlyMode) {
+                if (leniencyConfig.press_only_mode) {
                   sectionEvents = sectionEvents.filter(exp => exp.kind === 'down');
                 }
 
@@ -1342,7 +1333,7 @@ export default function App() {
 
                 // In press-only mode, only show next press event
                 const nextEvent = gameData.events.find(exp => {
-                  if (pressOnlyMode && exp.kind === 'up') return false;
+                  if (leniencyConfig.press_only_mode && exp.kind === 'up') return false;
                   const leniency = getLeniency(exp.idx);
                   return exp.t > currentTime - leniency.early;
                 });
@@ -1583,10 +1574,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* Default Leniency */}
+            {/* Default Leniency & Settings */}
             <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 sm:p-6 mb-6">
-              <h3 className="text-lg font-semibold text-slate-100 mb-4">Default Leniency</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <h3 className="text-lg font-semibold text-slate-100 mb-4">Default Settings</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-sm text-slate-400 mb-2">Early Leniency (ticks)</label>
                   <input
@@ -1620,7 +1611,7 @@ export default function App() {
                     <div key={event.idx} className="bg-slate-700 p-3 rounded-lg">
                       <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
                         {/* Event info */}
-                        <div className="sm:col-span-4">
+                        <div className="sm:col-span-3">
                           <p className="text-xs text-slate-400">
                             Event #{event.idx}
                           </p>
@@ -1652,8 +1643,8 @@ export default function App() {
                         </div>
 
                         {/* Clear button */}
-                        <div className="sm:col-span-2 flex items-center">
-                          {customLeniency && (
+                        <div className="sm:col-span-2 flex items-center justify-center">
+                          {customLeniency && customLeniency.enabled !== false && (
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1665,6 +1656,21 @@ export default function App() {
                             >
                               Reset
                             </button>
+                          )}
+                        </div>
+
+                        {/* Enabled checkbox (only for UP events) */}
+                        <div className="sm:col-span-1 flex items-center justify-center">
+                          {event.kind === 'up' && (
+                            <label className="flex items-center gap-1 cursor-pointer text-xs text-slate-300">
+                              <span className="text-purple-400 font-semibold">Include</span>
+                              <input
+                                type="checkbox"
+                                name={`event_${event.idx}_enabled`}
+                                defaultChecked={customLeniency?.enabled !== false}
+                                className="w-4 h-4"
+                              />
+                            </label>
                           )}
                         </div>
                       </div>
@@ -1707,22 +1713,27 @@ export default function App() {
                     editingMapData.events.forEach((event) => {
                       const earlyValue = form[`event_${event.idx}_early`]?.value;
                       const lateValue = form[`event_${event.idx}_late`]?.value;
+                      const enabledCheckbox = form[`event_${event.idx}_enabled`];
+                      const isEnabled = enabledCheckbox ? enabledCheckbox.checked : true;
 
-                      if (earlyValue || lateValue) {
-                        const entry = {};
+                      const entry = {};
 
-                        if (earlyValue) {
-                          entry.early_ms = ticksToMs(parseFloat(earlyValue), editingMapData.fps);
-                        }
+                      if (earlyValue) {
+                        entry.early_ms = ticksToMs(parseFloat(earlyValue), editingMapData.fps);
+                      }
 
-                        if (lateValue) {
-                          entry.late_ms = ticksToMs(parseFloat(lateValue), editingMapData.fps);
-                        }
+                      if (lateValue) {
+                        entry.late_ms = ticksToMs(parseFloat(lateValue), editingMapData.fps);
+                      }
 
-                        // Only save if entry has at least one field
-                        if (Object.keys(entry).length > 0) {
-                          custom[event.idx.toString()] = entry;
-                        }
+                      // Save enabled status if it's false (default is true, so only save when disabled)
+                      if (!isEnabled) {
+                        entry.enabled = false;
+                      }
+
+                      // Only save if entry has at least one field
+                      if (Object.keys(entry).length > 0) {
+                        custom[event.idx.toString()] = entry;
                       }
                     });
 
