@@ -33,6 +33,7 @@ export default function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [practiceStart, setPracticeStart] = useState('');
   const [practiceEnd, setPracticeEnd] = useState('');
+  const [shapeScrollSpeed, setShapeScrollSpeed] = useState(2.5);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, message: '', onConfirm: null });
   const [leniencyConfig, setLeniencyConfig] = useState(null);
   const [editingMapData, setEditingMapData] = useState(null);
@@ -47,6 +48,7 @@ export default function App() {
   const gainNodeRef = useRef(null);
   const beepEnabledRef = useRef(beepEnabled);
   const musicEnabledRef = useRef(musicEnabled);
+  const leniencyConfigRef = useRef(leniencyConfig);
   const musicAudioRef = useRef(null);
   const musicUrlRef = useRef(null);
   const spaceHeldRef = useRef(false);
@@ -80,6 +82,10 @@ export default function App() {
   useEffect(() => {
     musicEnabledRef.current = musicEnabled;
   }, [musicEnabled]);
+
+  useEffect(() => {
+    leniencyConfigRef.current = leniencyConfig;
+  }, [leniencyConfig]);
 
   const refreshMaps = async (forceRefresh = false) => {
     try {
@@ -486,6 +492,7 @@ export default function App() {
       setLeadInCountdown(LEAD_IN_S);
       setCountdownStarted(false);
       setPlaybackSpeed(1.0);
+      setShapeScrollSpeed(2.5);
       setPracticeStart('');
       setPracticeEnd('');
 
@@ -577,7 +584,7 @@ export default function App() {
           const ev = gameData.events[beepNextIdxRef.current];
 
           // Check if this event is disabled in leniency config
-          const isDisabled = gameData.leniency?.custom?.[ev.idx]?.enabled === false;
+          const isDisabled = leniencyConfigRef.current?.custom?.[ev.idx]?.enabled === false;
 
           if (!isDisabled) {
             const audioTime = audioCtx.currentTime;
@@ -1175,6 +1182,30 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Shape Scroll Speed */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Shape Scroll Time: {shapeScrollSpeed.toFixed(2)}s
+                </label>
+                <p className="text-xs text-slate-400 mb-2">
+                  Lower = shapes move faster (less preview time)
+                </p>
+                <input
+                  type="range"
+                  min="1.0"
+                  max="5.0"
+                  step="0.1"
+                  value={shapeScrollSpeed}
+                  onChange={(e) => setShapeScrollSpeed(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                />
+                <div className="flex justify-between text-xs text-slate-500 mt-1 px-1">
+                  <span>1.0s (fast)</span>
+                  <span className="relative" style={{left: '-12%'}}>2.5s</span>
+                  <span>5.0s (slow)</span>
+                </div>
+              </div>
+
               {/* Section Practice */}
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -1262,12 +1293,33 @@ export default function App() {
         >
           <GameCanvas
             currentTime={currentTime}
-            notes={gameData.notes}
+            notes={(() => {
+              // Convert hold notes to single notes when their release event is disabled
+              if (!leniencyConfig) return gameData.notes;
+
+              return gameData.notes.map(note => {
+                // For hold notes, check if the release event at end_t is disabled
+                if (note.is_hold) {
+                  // Find the release event that matches this note's end_t
+                  const releaseEvent = gameData.events.find(
+                    ev => ev.kind === 'up' && Math.abs(ev.t - note.end_t) < 0.001
+                  );
+                  if (releaseEvent) {
+                    const isDisabled = leniencyConfig.custom?.[releaseEvent.idx]?.enabled === false;
+                    if (isDisabled) {
+                      // Convert to single note (keep only the press, hide hold bar and release)
+                      return { ...note, is_hold: false, end_t: note.start_t };
+                    }
+                  }
+                }
+                return note;
+              });
+            })()}
             inputEvents={inputEvents}
             expectedEvents={gameData.events}
             targetX={targetX}
             laneY={laneY}
-            scrollS={SCROLL_S}
+            scrollS={shapeScrollSpeed}
             width={width}
             height={height}
           />
