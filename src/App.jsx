@@ -33,7 +33,10 @@ export default function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [practiceStart, setPracticeStart] = useState('');
   const [practiceEnd, setPracticeEnd] = useState('');
-  const [shapeScrollSpeed, setShapeScrollSpeed] = useState(2.5);
+  const [shapeScrollSpeed, setShapeScrollSpeed] = useState(() => {
+    const saved = localStorage.getItem('shapeScrollSpeed');
+    return saved ? parseFloat(saved) : 2.5;
+  });
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, message: '', onConfirm: null });
   const [leniencyConfig, setLeniencyConfig] = useState(null);
   const [editingMapData, setEditingMapData] = useState(null);
@@ -44,8 +47,10 @@ export default function App() {
   const gameLoopRef = useRef(null);
   const playStartRef = useRef(0);
   const audioContextRef = useRef(null);
-  const oscillatorRef = useRef(null);
-  const gainNodeRef = useRef(null);
+  const metronomeOscillatorRef = useRef(null);
+  const metronomeGainRef = useRef(null);
+  const hitOscillatorRef = useRef(null);
+  const hitGainRef = useRef(null);
   const beepEnabledRef = useRef(beepEnabled);
   const musicEnabledRef = useRef(musicEnabled);
   const leniencyConfigRef = useRef(leniencyConfig);
@@ -73,6 +78,11 @@ export default function App() {
   useEffect(() => {
     refreshMaps();
   }, []);
+
+  // Save shape scroll speed to localStorage
+  useEffect(() => {
+    localStorage.setItem('shapeScrollSpeed', shapeScrollSpeed.toString());
+  }, [shapeScrollSpeed]);
 
   // Keep refs in sync
   useEffect(() => {
@@ -492,7 +502,7 @@ export default function App() {
       setLeadInCountdown(LEAD_IN_S);
       setCountdownStarted(false);
       setPlaybackSpeed(1.0);
-      setShapeScrollSpeed(2.5);
+      // Keep shapeScrollSpeed from localStorage - don't reset
       setPracticeStart('');
       setPracticeEnd('');
 
@@ -542,23 +552,35 @@ export default function App() {
     inputEventsRef.current = [];
     endingGameRef.current = false;
 
-    // Initialize audio for beeps
+    // Initialize audio context
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
     }
     const audioCtx = audioContextRef.current;
 
-    // Create oscillator and gain node
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.value = 432; // Same as old: 432 Hz
-    gainNode.gain.value = 0; // Start silent
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    oscillator.start();
-    oscillatorRef.current = oscillator;
-    gainNodeRef.current = gainNode;
+    // Create metronome oscillator (432 Hz - normal beep)
+    const metronomeOsc = audioCtx.createOscillator();
+    const metronomeGain = audioCtx.createGain();
+    metronomeOsc.type = 'sine';
+    metronomeOsc.frequency.value = 432;
+    metronomeGain.gain.value = 0; // Start silent
+    metronomeOsc.connect(metronomeGain);
+    metronomeGain.connect(audioCtx.destination);
+    metronomeOsc.start();
+    metronomeOscillatorRef.current = metronomeOsc;
+    metronomeGainRef.current = metronomeGain;
+
+    // Create hit oscillator (880 Hz - high-pitched beep for hits)
+    const hitOsc = audioCtx.createOscillator();
+    const hitGain = audioCtx.createGain();
+    hitOsc.type = 'sine';
+    hitOsc.frequency.value = 880;
+    hitGain.gain.value = 0; // Start silent
+    hitOsc.connect(hitGain);
+    hitGain.connect(audioCtx.destination);
+    hitOsc.start();
+    hitOscillatorRef.current = hitOsc;
+    hitGainRef.current = hitGain;
 
     // Start music if available and enabled
     if (musicAudioRef.current && musicEnabledRef.current) {
@@ -578,7 +600,7 @@ export default function App() {
       setCurrentTime(timeValue);
 
       // Handle beeps based on macro events
-      if (beepEnabledRef.current && gameData.events && gainNodeRef.current) {
+      if (beepEnabledRef.current && gameData.events) {
         while (beepNextIdxRef.current < gameData.events.length &&
                gameData.events[beepNextIdxRef.current].t <= t) {
           const ev = gameData.events[beepNextIdxRef.current];
@@ -587,13 +609,43 @@ export default function App() {
           const isDisabled = leniencyConfigRef.current?.custom?.[ev.idx]?.enabled === false;
 
           if (!isDisabled) {
+            // Check if this event was hit by the user
+            const custom = leniencyConfigRef.current?.custom?.[ev.idx.toString()];
+            const earlyWindow = (custom?.early_ms ?? leniencyConfigRef.current?.default_early_ms ?? HIT_WINDOW_MS) / 1000;
+            const lateWindow = (custom?.late_ms ?? leniencyConfigRef.current?.default_late_ms ?? HIT_WINDOW_MS) / 1000;
+
+            // Look for a matching input within the leniency window
+            const wasHit = inputEventsRef.current.some(input => {
+              if (input.kind !== ev.kind) return false;
+              const offset = input.actual_t - ev.t;
+              return offset >= -earlyWindow && offset <= lateWindow;
+            });
+
             const audioTime = audioCtx.currentTime;
-            gainNodeRef.current.gain.cancelScheduledValues(audioTime);
-            gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, audioTime);
+
             if (ev.kind === 'down') {
-              gainNodeRef.current.gain.linearRampToValueAtTime(BEEP_VOLUME, audioTime + 0.008);
+              // On press: ramp up the appropriate oscillator
+              if (wasHit && hitGainRef.current) {
+                hitGainRef.current.gain.cancelScheduledValues(audioTime);
+                hitGainRef.current.gain.setValueAtTime(hitGainRef.current.gain.value, audioTime);
+                hitGainRef.current.gain.linearRampToValueAtTime(BEEP_VOLUME, audioTime + 0.008);
+              } else if (metronomeGainRef.current) {
+                metronomeGainRef.current.gain.cancelScheduledValues(audioTime);
+                metronomeGainRef.current.gain.setValueAtTime(metronomeGainRef.current.gain.value, audioTime);
+                metronomeGainRef.current.gain.linearRampToValueAtTime(BEEP_VOLUME, audioTime + 0.008);
+              }
             } else {
-              gainNodeRef.current.gain.linearRampToValueAtTime(0, audioTime + 0.018);
+              // On release: ramp down BOTH oscillators to ensure cleanup
+              if (hitGainRef.current) {
+                hitGainRef.current.gain.cancelScheduledValues(audioTime);
+                hitGainRef.current.gain.setValueAtTime(hitGainRef.current.gain.value, audioTime);
+                hitGainRef.current.gain.linearRampToValueAtTime(0, audioTime + 0.018);
+              }
+              if (metronomeGainRef.current) {
+                metronomeGainRef.current.gain.cancelScheduledValues(audioTime);
+                metronomeGainRef.current.gain.setValueAtTime(metronomeGainRef.current.gain.value, audioTime);
+                metronomeGainRef.current.gain.linearRampToValueAtTime(0, audioTime + 0.018);
+              }
             }
           }
 
@@ -641,15 +693,24 @@ export default function App() {
       gameLoopRef.current = null;
     }
 
-    // Stop and clean up beep audio
-    if (oscillatorRef.current) {
-      oscillatorRef.current.stop();
-      oscillatorRef.current.disconnect();
-      oscillatorRef.current = null;
+    // Stop and clean up oscillators
+    if (metronomeOscillatorRef.current) {
+      metronomeOscillatorRef.current.stop();
+      metronomeOscillatorRef.current.disconnect();
+      metronomeOscillatorRef.current = null;
     }
-    if (gainNodeRef.current) {
-      gainNodeRef.current.disconnect();
-      gainNodeRef.current = null;
+    if (metronomeGainRef.current) {
+      metronomeGainRef.current.disconnect();
+      metronomeGainRef.current = null;
+    }
+    if (hitOscillatorRef.current) {
+      hitOscillatorRef.current.stop();
+      hitOscillatorRef.current.disconnect();
+      hitOscillatorRef.current = null;
+    }
+    if (hitGainRef.current) {
+      hitGainRef.current.disconnect();
+      hitGainRef.current = null;
     }
 
     // Stop music
@@ -1192,7 +1253,7 @@ export default function App() {
                 </p>
                 <input
                   type="range"
-                  min="1.0"
+                  min="0.5"
                   max="5.0"
                   step="0.1"
                   value={shapeScrollSpeed}
@@ -1200,8 +1261,8 @@ export default function App() {
                   className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
                 />
                 <div className="flex justify-between text-xs text-slate-500 mt-1 px-1">
-                  <span>1.0s (fast)</span>
-                  <span className="relative" style={{left: '-12%'}}>2.5s</span>
+                  <span>0.5s (fastest)</span>
+                  <span className="relative" style={{left: '-7%'}}>2.5s</span>
                   <span>5.0s (slow)</span>
                 </div>
               </div>
@@ -1497,6 +1558,7 @@ export default function App() {
                 <div className="space-y-2">
                   {stats.detailed_results.map((result, idx) => {
                         const isHit = result.verdict === 'hit';
+                        const isUnexpected = result.verdict === 'unexpected';
 
                         return (
                           <div
@@ -1504,21 +1566,32 @@ export default function App() {
                             className={`p-3 rounded-lg border-l-4 ${
                               isHit
                                 ? 'bg-green-900/20 border-green-500'
-                                : 'bg-red-900/20 border-red-500'
+                                : isUnexpected
+                                  ? 'bg-orange-900/20 border-orange-500'
+                                  : 'bg-red-900/20 border-red-500'
                             }`}
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex-1">
                                 <div className="flex items-center gap-4">
-                                  <span className="text-sm font-mono text-slate-400">#{result.idx}</span>
+                                  <span className={`text-sm font-mono ${isUnexpected ? 'text-orange-400' : 'text-slate-400'}`}>
+                                    #{result.idx}{isUnexpected && ' (unexpected)'}
+                                  </span>
                                   <span className={`text-sm font-semibold ${
                                     result.kind === 'down' ? 'text-blue-400' : 'text-purple-400'
                                   }`}>
                                     {result.kind === 'down' ? '▼ PRESS' : '▲ RELEASE'}
                                   </span>
-                                  <span className="text-sm text-slate-400">
-                                    @ {result.expected_t.toFixed(3)}s (f{result.expected_frame})
-                                  </span>
+                                  {!isUnexpected && result.expected_t !== null && (
+                                    <span className="text-sm text-slate-400">
+                                      @ {result.expected_t.toFixed(3)}s (f{result.expected_frame})
+                                    </span>
+                                  )}
+                                  {isUnexpected && result.actual_t !== null && (
+                                    <span className="text-sm text-slate-400">
+                                      @ {result.actual_t.toFixed(3)}s
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="text-right">
@@ -1532,10 +1605,29 @@ export default function App() {
                                     </span>
                                   </div>
                                 )}
-                                {!isHit && (
-                                  <span className="text-lg font-bold text-red-400">
-                                    {result.actual_t === null ? 'NO INPUT' : 'MISS'}
-                                  </span>
+                                {!isHit && !isUnexpected && (
+                                  <div>
+                                    {result.actual_t === null ? (
+                                      <span className="text-lg font-bold text-red-400">NO INPUT</span>
+                                    ) : (
+                                      <div>
+                                        <span className="text-lg font-bold text-red-400">MISS</span>
+                                        <span className="text-xs text-slate-400 block">
+                                          ({result.offset_ms >= 0 ? '+' : ''}{result.offset_ms.toFixed(1)}ms off)
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {isUnexpected && result.offset_ms !== null && (
+                                  <div>
+                                    <span className="text-lg font-bold text-orange-400">
+                                      {result.offset_ms >= 0 ? '+' : ''}{Math.round(msToTicks(result.offset_ms, selectedMap.fps))} ticks
+                                    </span>
+                                    <span className="text-xs text-slate-400 block">
+                                      (from nearest)
+                                    </span>
+                                  </div>
                                 )}
                               </div>
                             </div>
